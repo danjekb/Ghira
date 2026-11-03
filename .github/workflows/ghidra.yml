@@ -4,69 +4,93 @@ on:
   workflow_dispatch:
     inputs:
       zip_url:
-        description: 'Direct link do ZIP-a z libami'
+        description: 'Direct link do ZIP-a z bibliotekami'
         required: true
-        default: ''
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   decompile:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+
     steps:
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
-          distribution: 'temurin'
+          distribution: temurin
 
-      - name: Setup Ghidra Action
+      - name: Set up Ghidra
         uses: antoniovazquezblanco/setup-ghidra@v2.3.0
 
-      - name: Download ZIP with libs
+      - name: Download and extract libraries
+        shell: bash
+        env:
+          ZIP_URL: ${{ inputs.zip_url }}
         run: |
-          curl -L -o libs.zip "${{ github.event.inputs.zip_url }}"
-          unzip -o libs.zip -d ./libs
+          set -euo pipefail
 
-      - name: Create Ghidra project
-        run: mkdir -p /tmp/ghidra_project
+          if [[ -z "$ZIP_URL" ]]; then
+            echo "Error: zip_url is empty."
+            exit 1
+          fi
 
-      - name: Analyze libMSDKSystem.so
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "$ZIP_URL" --output libs.zip
+
+          mkdir -p libs
+          unzip -oq libs.zip -d libs
+          rm -f libs.zip
+
+          echo "Found shared libraries:"
+          find libs -type f -name '*.so' -print
+
+          mapfile -d '' LIBRARIES < <(find libs -type f -name '*.so' -print0)
+
+          if (( ${#LIBRARIES[@]} == 0 )); then
+            echo "Error: ZIP contains no .so libraries."
+            exit 1
+          fi
+
+          printf '%s\n' "${LIBRARIES[@]}" > libraries.txt
+
+      - name: Create Ghidra project directory
+        run: mkdir -p "$GITHUB_WORKSPACE/ghidra_project"
+
+      - name: Analyze all libraries
+        shell: bash
         run: |
-          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project MSDKSystem \
-            -import ./libs/libMSDKSystem.so -recursive -deleteProject || true
-        working-directory: ${{ github.workspace }}
+          set -euo pipefail
 
-      - name: Analyze libgcloudcore.so
+          mapfile -t LIBRARIES < libraries.txt
+
+          if [[ ! -x "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" ]]; then
+            echo "Error: analyzeHeadless not found in GHIDRA_INSTALL_DIR."
+            exit 1
+          fi
+
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" \
+            "$GITHUB_WORKSPACE/ghidra_project" \
+            GhidraAnalysis \
+            -import "${LIBRARIES[@]}" \
+            -overwrite
+
+      - name: Verify Ghidra project
+        if: always()
+        shell: bash
         run: |
-          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project GCloudCore \
-            -import ./libs/libgcloudcore.so -recursive -deleteProject || true
-        working-directory: ${{ github.workspace }}
+          echo "Ghidra project contents:"
+          find ghidra_project -maxdepth 4 -type f -print 2>/dev/null | head -200 || true
 
-      - name: Analyze libMSDK.so
-        run: |
-          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project MSDK \
-            -import ./libs/libMSDK.so -recursive -deleteProject || true
-        working-directory: ${{ github.workspace }}
-
-      - name: Analyze libopenplatform.so
-        run: |
-          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project OpenPlatform \
-            -import ./libs/libopenplatform.so -recursive -deleteProject || true
-        working-directory: ${{ github.workspace }}
-
-      - name: Analyze libg.so
-        run: |
-          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project LibG \
-            -import ./libs/libg.so -recursive -deleteProject || true
-        working-directory: ${{ github.workspace }}
-
-      - name: Debug: list project files
-        run: find /tmp/ghidra_project -type f 2>/dev/null | head -50
-
-      - name: Upload results
+      - name: Upload Ghidra project
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ghidra-analysis
-          path: |
-            /tmp/ghidra_project/**/*
-            /tmp/ghidra_project/**/**
+          path: ghidra_project/
           if-no-files-found: warn
+          retention-days: 7
+          
