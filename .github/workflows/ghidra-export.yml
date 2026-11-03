@@ -1,0 +1,133 @@
+name: Ghidra auth export
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_url:
+        description: Direct URL to the ZIP containing the .so files
+        required: true
+        type: string
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Ghidra
+        uses: antoniovazquezblanco/setup-ghidra@v2.3.0
+
+      - name: Download libraries
+        run: |
+          curl --fail --location --retry 3 --output libs.zip "${{ inputs.zip_url }}"
+          mkdir -p libs
+          unzip -q libs.zip -d libs
+
+      - name: Create read-only export script
+        run: |
+          mkdir -p ghidra-scripts exports /tmp/ghidra_project
+          cat > ghidra-scripts/ExportAuth.py <<'PY'
+          #@category Export
+          # Export strings and decompiled functions related to authentication.
+          # This script only reads the imported program database.
+          from ghidra.app.decompiler import DecompInterface
+          from ghidra.util.task import ConsoleTaskMonitor
+          from java.io import File
+
+          args = getScriptArgs()
+          if len(args) < 2:
+              raise Exception("Expected: output-file library-name")
+          output_path = args[0]
+          label = args[1]
+          terms = ["login", "openid", "token", "auth", "scid", "supercell", "wechat", "weixin", "qq", "realname"]
+
+          def relevant(value):
+              low = value.lower()
+              for term in terms:
+                  if term in low:
+                      return True
+              return False
+
+          listing = currentProgram.getListing()
+          refs = currentProgram.getReferenceManager()
+          funcs = currentProgram.getFunctionManager()
+          selected = set()
+          strings = []
+
+          data_iter = listing.getDefinedData(True)
+          while data_iter.hasNext():
+              data = data_iter.next()
+              value = data.getValue()
+              if value is None:
+                  continue
+              text = str(value)
+              if not relevant(text):
+                  continue
+              strings.append((str(data.getAddress()), text))
+              ref_iter = refs.getReferencesTo(data.getAddress())
+              while ref_iter.hasNext():
+                  ref = ref_iter.next()
+                  function = funcs.getFunctionContaining(ref.getFromAddress())
+                  if function is not None:
+                      selected.add(function)
+
+          func_iter = funcs.getFunctions(True)
+          while func_iter.hasNext():
+              function = func_iter.next()
+              if relevant(function.getName()):
+                  selected.add(function)
+
+          chosen = sorted(selected, key=lambda f: str(f.getEntryPoint()))[:100]
+          out = open(output_path, "w")
+          out.write("# Ghidra read-only export: " + label + "\n")
+          out.write("# Matched strings: " + str(len(strings)) + "; selected functions: " + str(len(chosen)) + "\n\n")
+          out.write("## Relevant strings\n")
+          for address, text in strings:
+              out.write(address + "  " + text + "\n")
+
+          out.write("\n## Decompiled functions\n")
+          decompiler = DecompInterface()
+          decompiler.openProgram(currentProgram)
+          monitor = ConsoleTaskMonitor()
+          for function in chosen:
+              out.write("\n\n===== " + function.getName() + " @ " + str(function.getEntryPoint()) + " =====\n")
+              result = decompiler.decompileFunction(function, 30, monitor)
+              decompiled = result.getDecompiledFunction()
+              if decompiled is None:
+                  out.write("[No pseudocode returned: " + result.getErrorMessage() + "]\n")
+              else:
+                  out.write(decompiled.getC() + "\n")
+          decompiler.dispose()
+          out.close()
+          PY
+
+      - name: Analyze and export each library
+        run: |
+          set -euo pipefail
+          for name in libMSDKSystem.so libgcloudcore.so libMSDK.so libopenplatform.so libg.so; do
+            library="$(find libs -type f -name "$name" -print -quit)"
+            test -n "$library"
+            "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project GhidraAnalysis \
+              -import "$library" \
+              -analysisTimeoutPerFile 1200 \
+              -scriptPath "$GITHUB_WORKSPACE/ghidra-scripts" \
+              -postScript ExportAuth.py "$GITHUB_WORKSPACE/exports/$name.txt" "$name"
+          done
+
+      - name: Upload text exports
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-text-export
+          path: exports/
+          if-no-files-found: error
+
+      - name: Upload Ghidra project
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-project
+          path: /tmp/ghidra_project/
+          if-no-files-found: error
