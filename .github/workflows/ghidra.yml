@@ -1,0 +1,68 @@
+name: Ghidra Decompile
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_url:
+        description: 'Direct link do ZIP-a z libami'
+        required: true
+        default: ''
+
+jobs:
+  decompile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Ghidra
+        uses: naga24/setup-ghidra-action@v1
+        with:
+          ghidra-version: '12.1.4'
+
+      - name: Download ZIP with libs
+        run: |
+          curl -L -o libs.zip "${{ github.event.inputs.zip_url }}"
+          unzip -o libs.zip -d ./libs
+
+      - name: Create Ghidra project
+        run: mkdir -p /tmp/ghidra_project
+
+      - name: Analyze libMSDKSystem.so
+        run: |
+          analyzeHeadless /tmp/ghidra_project MSDKSystem \
+            -import ./libs/libMSDKSystem.so -recursive -deleteProject || true
+        working-directory: ${{ github.workspace }}
+
+      - name: Analyze libgcloudcore.so
+        run: |
+          analyzeHeadless /tmp/ghidra_project GCloudCore \
+            -import ./libs/libgcloudcore.so -recursive -deleteProject || true
+        working-directory: ${{ github.workspace }}
+
+      - name: Analyze libMSDK.so
+        run: |
+          analyzeHeadless /tmp/ghidra_project MSDK \
+            -import ./libs/libMSDK.so -recursive -deleteProject || true
+        working-directory: ${{ github.workspace }}
+
+      - name: Analyze libopenplatform.so
+        run: |
+          analyzeHeadless /tmp/ghidra_project OpenPlatform \
+            -import ./libs/libopenplatform.so -recursive -deleteProject || true
+        working-directory: ${{ github.workspace }}
+
+      - name: Analyze libg.so
+        run: |
+          analyzeHeadless /tmp/ghidra_project LibG \
+            -import ./libs/libg.so -recursive -deleteProject || true
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-analysis
+          path: /tmp/ghidra_project/**/*
