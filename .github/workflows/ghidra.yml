@@ -59,8 +59,14 @@ jobs:
             -import ./libs/libg.so -recursive -deleteProject || true
         working-directory: ${{ github.workspace }}
 
+      - name: Debug: list project files
+        run: find /tmp/ghidra_project -type f 2>/dev/null | head -50
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
           name: ghidra-analysis
-          path: /tmp/ghidra_project/**/*
+          path: |
+            /tmp/ghidra_project/**/*
+            /tmp/ghidra_project/**/**
+          if-no-files-found: warn
