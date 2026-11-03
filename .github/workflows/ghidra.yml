@@ -31,31 +31,31 @@ jobs:
 
       - name: Analyze libMSDKSystem.so
         run: |
-          analyzeHeadless /tmp/ghidra_project MSDKSystem \
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project MSDKSystem \
             -import ./libs/libMSDKSystem.so -recursive -deleteProject || true
         working-directory: ${{ github.workspace }}
 
       - name: Analyze libgcloudcore.so
         run: |
-          analyzeHeadless /tmp/ghidra_project GCloudCore \
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project GCloudCore \
             -import ./libs/libgcloudcore.so -recursive -deleteProject || true
         working-directory: ${{ github.workspace }}
 
       - name: Analyze libMSDK.so
         run: |
-          analyzeHeadless /tmp/ghidra_project MSDK \
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project MSDK \
             -import ./libs/libMSDK.so -recursive -deleteProject || true
         working-directory: ${{ github.workspace }}
 
       - name: Analyze libopenplatform.so
         run: |
-          analyzeHeadless /tmp/ghidra_project OpenPlatform \
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project OpenPlatform \
             -import ./libs/libopenplatform.so -recursive -deleteProject || true
         working-directory: ${{ github.workspace }}
 
       - name: Analyze libg.so
         run: |
-          analyzeHeadless /tmp/ghidra_project LibG \
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/ghidra_project LibG \
             -import ./libs/libg.so -recursive -deleteProject || true
         working-directory: ${{ github.workspace }}
 
