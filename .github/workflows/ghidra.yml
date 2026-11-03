@@ -18,10 +18,8 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Setup Ghidra
-        uses: naga24/setup-ghidra-action@v1
-        with:
-          ghidra-version: '12.1.4'
+      - name: Setup Ghidra Action
+        uses: antoniovazquezblanco/setup-ghidra@v2.3.0
 
       - name: Download ZIP with libs
         run: |
